@@ -6,7 +6,7 @@ from PIL import Image
 import io
 from datetime import datetime
 from pydantic import BaseModel
-import prototypes.collect_prototype as waste_analyzer
+import generativeai.waste_analyzer as waste_analyzer
 from database import get_db
 import json
 

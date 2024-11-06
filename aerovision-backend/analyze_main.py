@@ -6,7 +6,7 @@ from PIL import Image
 import io
 from datetime import datetime
 from pydantic import BaseModel
-import prototypes.analyze_prototype as chart_analyzer
+import generativeai.chart_analyzer as chart_analyzer
 from database import get_db
 import json
 
