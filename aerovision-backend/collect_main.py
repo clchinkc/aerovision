@@ -379,3 +379,45 @@ async def get_waste_statistics(
             "average_visible_weight": result['avg_visible_weight'],
             "waste_distribution": waste_distribution
         }
+
+# Add new endpoint for manual waste entry without image
+@app.post("/api/analyze/manual")
+async def analyze_manual(
+    items: List[WasteItemEntry],
+    total_weight: Optional[float] = None,
+    flight_id: Optional[str] = None
+):
+    """Submit waste analysis manually without image"""
+    try:
+        # Create analysis from manual entries
+        analysis = waste_analyzer.WasteAnalysis(
+            visible_weight=total_weight or sum(item.quantity for item in items),
+            items=[waste_analyzer.WasteItem(**item.dict()) for item in items]
+        )
+        
+        result = waste_analyzer.AnalysisResult(
+            analysis=analysis,
+            timestamp=datetime.now().isoformat(),
+            flight_id=flight_id
+        )
+        
+        # Store in database
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO waste_analyses 
+                (timestamp, flight_id, visible_weight, hidden_weight, items_json)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (
+                result.timestamp,
+                result.flight_id,
+                result.analysis.visible_weight,
+                result.analysis.hidden_weight,
+                json.dumps([item.dict() for item in result.analysis.items])
+            ))
+            conn.commit()
+        
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

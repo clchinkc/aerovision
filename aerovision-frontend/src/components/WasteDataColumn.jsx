@@ -1,13 +1,14 @@
 import React from 'react';
 
-function WasteDataColumn({ title }) {
-  const wasteData = [
-    { type: '塑膠', amount: '61' },
-    { type: '紙張', amount: '72' },
-    { type: '金屬', amount: '40' },
-    { type: '食物', amount: '270' },
-    { type: '玻璃', amount: '18' },
-    { type: '其他', amount: '11' },
+function WasteDataColumn({ title, data }) {
+  // Use the passed data if available, otherwise use default data
+  const wasteData = data?.analysis?.items || [
+    { waste_type: '塑膠', quantity: '61' },
+    { waste_type: '紙張', quantity: '72' },
+    { waste_type: '金屬', quantity: '40' },
+    { waste_type: '食物', quantity: '270' },
+    { waste_type: '玻璃', quantity: '18' },
+    { waste_type: '其他', quantity: '11' },
   ];
 
   return (
@@ -28,19 +29,19 @@ function WasteDataColumn({ title }) {
           </div>
         </header>
         <div className="flex relative z-10 flex-col items-center px-20 py-8 w-full text-3xl font-bold text-center text-black whitespace-nowrap min-h-[559px] max-md:px-5 max-md:max-w-full">
-          <img loading="lazy" src="https://cdn.builder.io/api/v1/image/assets/TEMP/f11a87bf9f8279e6889e12a8055ff694a6a754efb5380b190f6091a56df35ec1?placeholderIfAbsent=true&apiKey=5bc2a3668e784135b048483cd2966401" alt="" className="object-cover absolute inset-0 size-full" />
+          <img loading="lazy" src="https://cdn.builder.io/api/v1/image/assets/TEMP/f11a87bf9f8279e6889e12a8055ff694a6a754efb5380b190f6091a56df35ec1" alt="" className="object-cover absolute inset-0 size-full" />
           <div className="flex relative gap-10 max-w-full w-[322px]">
             <div className="flex flex-col flex-1">
               {wasteData.map((item, index) => (
-                <div key={index} data-layername={item.type} className={index > 0 ? "mt-16 max-md:mt-10" : ""}>
-                  {item.type}
+                <div key={index} className={index > 0 ? "mt-16 max-md:mt-10" : ""}>
+                  {item.waste_type}
                 </div>
               ))}
             </div>
             <div className="flex flex-col flex-1 items-center">
               {wasteData.map((item, index) => (
-                <div key={index} data-layername={item.amount} className={index > 0 ? "mt-16 max-md:mt-10" : ""}>
-                  {item.amount}
+                <div key={index} className={index > 0 ? "mt-16 max-md:mt-10" : ""}>
+                  {item.quantity}
                 </div>
               ))}
             </div>
