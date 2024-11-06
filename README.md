@@ -45,7 +45,7 @@ AeroVision is a web application designed to streamline the process of waste data
 
 - **Backend**: FastAPI for building the API endpoints, SQLite for database management.
 - **Frontend**: React for building the user interface, Tailwind CSS for styling.
-- **AI Integration**: Generative AI models for analyzing waste data and providing insights.
+- **Generative AI Integration**: Generative AI models for analyzing waste data and providing insights.
 
 ## Getting Started
 
