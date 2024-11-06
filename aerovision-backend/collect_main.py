@@ -6,7 +6,9 @@ from PIL import Image
 import io
 from datetime import datetime
 from pydantic import BaseModel
-import prototype as waste_analyzer
+import prototypes.collect_prototype as waste_analyzer
+from database import get_db
+import json
 
 app = FastAPI(title="AeroVision Waste Analysis API")
 
@@ -18,10 +20,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Temporary storage for draft entries (replace with database in production)
-draft_entries: Dict[str, List[waste_analyzer.WasteItem]] = {}
-analysis_storage = []
 
 class WasteItemEntry(BaseModel):
     waste_type: str
@@ -36,18 +34,34 @@ class SubmitAnalysis(BaseModel):
 async def add_waste_item(session_id: str, item: WasteItemEntry):
     """Add a single waste item to the draft session"""
     try:
-        if session_id not in draft_entries:
-            draft_entries[session_id] = []
+        with get_db() as conn:
+            cursor = conn.cursor()
             
-        waste_item = waste_analyzer.WasteItem(
-            waste_type=item.waste_type,
-            quantity=item.quantity,
-            recyclable=item.recyclable
-        )
-        
-        draft_entries[session_id].append(waste_item)
-        return {"message": "Item added successfully", "items": draft_entries[session_id]}
-        
+            # Get existing items or create new list
+            cursor.execute('SELECT items_json FROM draft_entries WHERE session_id = ?', (session_id,))
+            result = cursor.fetchone()
+            
+            items = []
+            if result:
+                items = json.loads(result['items_json'])
+            
+            # Add new item
+            waste_item = waste_analyzer.WasteItem(
+                waste_type=item.waste_type,
+                quantity=item.quantity,
+                recyclable=item.recyclable
+            )
+            items.append(waste_item.dict())
+            
+            # Update or insert
+            cursor.execute('''
+                INSERT OR REPLACE INTO draft_entries (session_id, items_json)
+                VALUES (?, ?)
+            ''', (session_id, json.dumps(items)))
+            
+            conn.commit()
+            return {"message": "Item added successfully", "items": items}
+            
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -55,73 +69,120 @@ async def add_waste_item(session_id: str, item: WasteItemEntry):
 async def remove_waste_item(session_id: str, item_index: int):
     """Remove a waste item from the draft session"""
     try:
-        if session_id not in draft_entries:
-            raise HTTPException(status_code=404, detail="Session not found")
+        with get_db() as conn:
+            cursor = conn.cursor()
             
-        if item_index < 0 or item_index >= len(draft_entries[session_id]):
-            raise HTTPException(status_code=404, detail="Item index out of range")
+            # Get existing items
+            cursor.execute('SELECT items_json FROM draft_entries WHERE session_id = ?', (session_id,))
+            result = cursor.fetchone()
             
-        draft_entries[session_id].pop(item_index)
-        return {"message": "Item removed successfully", "items": draft_entries[session_id]}
-        
+            items = json.loads(result['items_json'])
+            
+            if item_index < 0 or item_index >= len(items):
+                raise HTTPException(status_code=404, detail="Item index out of range")
+            
+            # Remove item
+            items.pop(item_index)
+            
+            # Update or insert
+            cursor.execute('''
+                INSERT OR REPLACE INTO draft_entries (session_id, items_json)
+                VALUES (?, ?)
+            ''', (session_id, json.dumps(items)))
+            
+            conn.commit()
+            return {"message": "Item removed successfully", "items": items}
+            
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/draft/{session_id}")
 async def get_draft_items(session_id: str):
     """Get all items in the draft session"""
-    if session_id not in draft_entries:
-        draft_entries[session_id] = []
-    return draft_entries[session_id]
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            
+            # Get existing items
+            cursor.execute('SELECT items_json FROM draft_entries WHERE session_id = ?', (session_id,))
+            result = cursor.fetchone()
+            
+            items = json.loads(result['items_json'])
+            
+            return items
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/draft/{session_id}/submit")
 async def submit_analysis(session_id: str, submission: SubmitAnalysis):
     """Submit the final analysis with all items"""
     try:
-        if session_id not in draft_entries:
-            raise HTTPException(status_code=404, detail="Session not found")
+        with get_db() as conn:
+            cursor = conn.cursor()
             
-        items = draft_entries[session_id]
-        if not items:
-            raise HTTPException(status_code=400, detail="No items to submit")
+            # Get existing items
+            cursor.execute('SELECT items_json FROM draft_entries WHERE session_id = ?', (session_id,))
+            result = cursor.fetchone()
             
-        # Calculate visible weight from items if not provided
-        visible_weight = submission.total_weight or sum(item.quantity for item in items)
-        
-        # Create analysis
-        analysis = waste_analyzer.WasteAnalysis(
-            visible_weight=visible_weight,
-            items=items
-        )
-        
-        result = waste_analyzer.AnalysisResult(
-            analysis=analysis,
-            timestamp=datetime.now().isoformat(),
-            flight_id=submission.flight_id
-        )
-        
-        # Store final analysis
-        analysis_storage.append({
-            "id": len(analysis_storage),
-            "timestamp": result.timestamp,
-            "flight_id": result.flight_id,
-            "analysis": result.analysis.dict()
-        })
-        
-        # Clear draft entries
-        del draft_entries[session_id]
-        
-        return result
-        
+            items = json.loads(result['items_json'])
+            
+            if not items:
+                raise HTTPException(status_code=400, detail="No items to submit")
+            
+            # Calculate visible weight from items if not provided
+            visible_weight = submission.total_weight or sum(item['quantity'] for item in items)
+            
+            # Create analysis
+            analysis = waste_analyzer.WasteAnalysis(
+                visible_weight=visible_weight,
+                items=items
+            )
+            
+            result = waste_analyzer.AnalysisResult(
+                analysis=analysis,
+                timestamp=datetime.now().isoformat(),
+                flight_id=submission.flight_id
+            )
+            
+            # Store final analysis
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO waste_analyses 
+                    (timestamp, flight_id, visible_weight, hidden_weight, items_json)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (
+                    result.timestamp,
+                    result.flight_id,
+                    result.analysis.visible_weight,
+                    result.analysis.hidden_weight,
+                    json.dumps([item.dict() for item in result.analysis.items])
+                ))
+                conn.commit()
+            
+            # Clear draft entries
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM draft_entries WHERE session_id = ?', (session_id,))
+                conn.commit()
+            
+            return result
+            
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/draft/{session_id}")
 async def clear_draft(session_id: str):
     """Clear all items in the draft session"""
-    if session_id in draft_entries:
-        del draft_entries[session_id]
-    return {"message": "Draft cleared successfully"}
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM draft_entries WHERE session_id = ?', (session_id,))
+            conn.commit()
+        return {"message": "Draft cleared successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/analyze")
 async def analyze_image(
@@ -148,13 +209,21 @@ async def analyze_image(
         # Clean up temporary file
         os.remove(temp_path)
         
-        # Store analysis result
-        analysis_storage.append({
-            "id": len(analysis_storage),
-            "timestamp": result.timestamp,
-            "flight_id": result.flight_id,
-            "analysis": result.analysis.dict()
-        })
+        # Store in database
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO waste_analyses 
+                (timestamp, flight_id, visible_weight, hidden_weight, items_json)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (
+                result.timestamp,
+                result.flight_id,
+                result.analysis.visible_weight,
+                result.analysis.hidden_weight,
+                json.dumps([item.dict() for item in result.analysis.items])
+            ))
+            conn.commit()
         
         return result
         
@@ -167,28 +236,146 @@ async def get_history(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None
 ):
-    filtered_results = analysis_storage
-    
-    if flight_id:
-        filtered_results = [r for r in filtered_results if r["flight_id"] == flight_id]
-    
-    if start_date:
-        start = datetime.fromisoformat(start_date)
-        filtered_results = [
-            r for r in filtered_results 
-            if datetime.fromisoformat(r["timestamp"]) >= start
-        ]
-    
-    if end_date:
-        end = datetime.fromisoformat(end_date)
-        filtered_results = [
-            r for r in filtered_results 
-            if datetime.fromisoformat(r["timestamp"]) <= end
-        ]
-    
-    return filtered_results
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        query = "SELECT * FROM waste_analyses WHERE 1=1"
+        params = []
+        
+        if flight_id:
+            query += " AND flight_id = ?"
+            params.append(flight_id)
+        
+        if start_date:
+            query += " AND timestamp >= ?"
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND timestamp <= ?"
+            params.append(end_date)
+        
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+        
+        return [{
+            "id": row['id'],
+            "timestamp": row['timestamp'],
+            "flight_id": row['flight_id'],
+            "analysis": {
+                "visible_weight": row['visible_weight'],
+                "hidden_weight": row['hidden_weight'],
+                "items": json.loads(row['items_json'])
+            }
+        } for row in results]
 
 @app.get("/api/waste-types")
 async def get_waste_types():
     """Get the list of predefined waste types"""
     return waste_analyzer.WASTE_TYPES
+
+# Add new endpoint for batch image upload
+@app.post("/api/analyze/batch")
+async def analyze_images_batch(
+    images: List[UploadFile] = File(...),
+    flight_id: Optional[str] = None,
+    total_weight: Optional[float] = None
+):
+    """Analyze multiple waste images in a batch"""
+    try:
+        results = []
+        for image in images:
+            contents = await image.read()
+            image_pil = Image.open(io.BytesIO(contents))
+            
+            temp_path = f"temp_{datetime.now().timestamp()}.jpg"
+            image_pil.save(temp_path)
+            
+            result = waste_analyzer.analyze_real_image(
+                temp_path,
+                total_weight=total_weight,
+                flight_id=flight_id
+            )
+            
+            os.remove(temp_path)
+            results.append(result)
+            
+        # Store all results in database
+        with get_db() as conn:
+            cursor = conn.cursor()
+            for result in results:
+                cursor.execute('''
+                    INSERT INTO waste_analyses 
+                    (timestamp, flight_id, visible_weight, hidden_weight, items_json)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (
+                    result.timestamp,
+                    result.flight_id,
+                    result.analysis.visible_weight,
+                    result.analysis.hidden_weight,
+                    json.dumps([item.dict() for item in result.analysis.items])
+                ))
+            conn.commit()
+        
+        return results
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/statistics")
+async def get_waste_statistics(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    flight_id: Optional[str] = None
+):
+    """Get waste statistics and trends"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        query = """
+            SELECT 
+                SUM(visible_weight) as total_visible_weight,
+                SUM(hidden_weight) as total_hidden_weight,
+                COUNT(*) as total_analyses,
+                AVG(visible_weight) as avg_visible_weight,
+                items_json
+            FROM waste_analyses 
+            WHERE 1=1
+        """
+        params = []
+        
+        if flight_id:
+            query += " AND flight_id = ?"
+            params.append(flight_id)
+            
+        if start_date:
+            query += " AND timestamp >= ?"
+            params.append(start_date)
+            
+        if end_date:
+            query += " AND timestamp <= ?"
+            params.append(end_date)
+            
+        cursor.execute(query, params)
+        result = cursor.fetchone()
+        
+        # Calculate waste type distribution
+        all_items = []
+        cursor.execute("SELECT items_json FROM waste_analyses")
+        for row in cursor.fetchall():
+            items = json.loads(row['items_json'])
+            all_items.extend(items)
+            
+        waste_distribution = {}
+        for item in all_items:
+            waste_type = item['waste_type']
+            if waste_type not in waste_distribution:
+                waste_distribution[waste_type] = 0
+            waste_distribution[waste_type] += item['quantity']
+        
+        return {
+            "total_visible_weight": result['total_visible_weight'],
+            "total_hidden_weight": result['total_hidden_weight'],
+            "total_analyses": result['total_analyses'],
+            "average_visible_weight": result['avg_visible_weight'],
+            "waste_distribution": waste_distribution
+        }

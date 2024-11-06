@@ -6,7 +6,9 @@ from PIL import Image
 import io
 from datetime import datetime
 from pydantic import BaseModel
-import analyze_prototype as chart_analyzer
+import prototypes.analyze_prototype as chart_analyzer
+from database import get_db
+import json
 
 app = FastAPI(title="AeroVision Chart Analysis API")
 
@@ -18,9 +20,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Storage for analysis results (replace with database in production)
-analysis_storage = []
 
 @app.post("/api/charts/analyze")
 async def analyze_chart(
@@ -50,14 +49,24 @@ async def analyze_chart(
         # Clean up temporary file
         os.remove(temp_path)
         
-        # Store analysis result
-        analysis_entry = {
-            "id": len(analysis_storage),
-            "timestamp": result.timestamp,
-            "chart_id": result.chart_id,
-            "analysis": result.analysis.dict()
-        }
-        analysis_storage.append(analysis_entry)
+        # Store in database
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO chart_analyses 
+                (timestamp, chart_id, chart_type, time_period, 
+                key_metrics_json, insights_json, recommendations_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                result.timestamp,
+                result.chart_id,
+                result.analysis.chart_type,
+                result.analysis.time_period,
+                json.dumps(result.analysis.key_metrics),
+                json.dumps([i.dict() for i in result.analysis.insights]),
+                json.dumps([r.dict() for r in result.analysis.recommendations])
+            ))
+            conn.commit()
         
         return result
         
@@ -72,36 +81,45 @@ async def get_analysis_history(
     limit: Optional[int] = None
 ):
     """Get historical chart analyses with optional filters"""
-    filtered_results = analysis_storage
-    
-    if chart_id:
-        filtered_results = [r for r in filtered_results if r["chart_id"] == chart_id]
-    
-    if start_date:
-        start = datetime.fromisoformat(start_date)
-        filtered_results = [
-            r for r in filtered_results 
-            if datetime.fromisoformat(r["timestamp"]) >= start
-        ]
-    
-    if end_date:
-        end = datetime.fromisoformat(end_date)
-        filtered_results = [
-            r for r in filtered_results 
-            if datetime.fromisoformat(r["timestamp"]) <= end
-        ]
-    
-    # Sort by timestamp in descending order (newest first)
-    filtered_results.sort(
-        key=lambda x: datetime.fromisoformat(x["timestamp"]), 
-        reverse=True
-    )
-    
-    # Apply limit if specified
-    if limit:
-        filtered_results = filtered_results[:limit]
-    
-    return filtered_results
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        query = "SELECT * FROM chart_analyses WHERE 1=1"
+        params = []
+        
+        if chart_id:
+            query += " AND chart_id = ?"
+            params.append(chart_id)
+        
+        if start_date:
+            query += " AND timestamp >= ?"
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND timestamp <= ?"
+            params.append(end_date)
+        
+        query += " ORDER BY timestamp DESC"
+        
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+        
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+        
+        return [{
+            "id": row['id'],
+            "timestamp": row['timestamp'],
+            "chart_id": row['chart_id'],
+            "analysis": {
+                "chart_type": row['chart_type'],
+                "time_period": row['time_period'],
+                "key_metrics": json.loads(row['key_metrics_json']),
+                "insights": json.loads(row['insights_json']),
+                "recommendations": json.loads(row['recommendations_json'])
+            }
+        } for row in results]
 
 @app.get("/api/charts/categories")
 async def get_analysis_categories():
@@ -111,7 +129,119 @@ async def get_analysis_categories():
 @app.get("/api/charts/{chart_id}")
 async def get_chart_analysis(chart_id: str):
     """Get a specific chart analysis by ID"""
-    results = [r for r in analysis_storage if r["chart_id"] == chart_id]
-    if not results:
-        raise HTTPException(status_code=404, detail="Chart analysis not found")
-    return results[0]
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM chart_analyses WHERE chart_id = ?", (chart_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            raise HTTPException(status_code=404, detail="Chart analysis not found")
+        
+        return {
+            "id": row['id'],
+            "timestamp": row['timestamp'],
+            "chart_id": row['chart_id'],
+            "analysis": {
+                "chart_type": row['chart_type'],
+                "time_period": row['time_period'],
+                "key_metrics": json.loads(row['key_metrics_json']),
+                "insights": json.loads(row['insights_json']),
+                "recommendations": json.loads(row['recommendations_json'])
+            }
+        }
+
+# Add new endpoint for trend analysis
+@app.get("/api/charts/trends")
+async def analyze_trends(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    chart_type: Optional[str] = None
+):
+    """Get trend analysis across multiple chart analyses"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        query = """
+            SELECT 
+                chart_type,
+                COUNT(*) as analysis_count,
+                insights_json,
+                recommendations_json
+            FROM chart_analyses
+            WHERE 1=1
+        """
+        params = []
+        
+        if chart_type:
+            query += " AND chart_type = ?"
+            params.append(chart_type)
+            
+        if start_date:
+            query += " AND timestamp >= ?"
+            params.append(start_date)
+            
+        if end_date:
+            query += " AND timestamp <= ?"
+            params.append(end_date)
+            
+        query += " GROUP BY chart_type"
+        
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+        
+        trends = []
+        for row in results:
+            insights = json.loads(row['insights_json'])
+            recommendations = json.loads(row['recommendations_json'])
+            
+            trends.append({
+                "chart_type": row['chart_type'],
+                "analysis_count": row['analysis_count'],
+                "common_insights": [i for i in insights if i['confidence'] > 0.8],
+                "top_recommendations": sorted(
+                    recommendations, 
+                    key=lambda x: x['priority'], 
+                    reverse=True
+                )[:3]
+            })
+            
+        return trends
+
+# Add endpoint for comparative analysis
+@app.post("/api/charts/compare")
+async def compare_charts(chart_ids: List[str]):
+    """Compare multiple chart analyses"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        analyses = []
+        for chart_id in chart_ids:
+            cursor.execute(
+                "SELECT * FROM chart_analyses WHERE chart_id = ?", 
+                (chart_id,)
+            )
+            row = cursor.fetchone()
+            if row:
+                analyses.append({
+                    "chart_id": row['chart_id'],
+                    "chart_type": row['chart_type'],
+                    "time_period": row['time_period'],
+                    "key_metrics": json.loads(row['key_metrics_json']),
+                    "insights": json.loads(row['insights_json'])
+                })
+        
+        if not analyses:
+            raise HTTPException(
+                status_code=404, 
+                detail="No charts found for comparison"
+            )
+            
+        return {
+            "analyses": analyses,
+            "common_metrics": list(set.intersection(*[
+                set(a['key_metrics']) for a in analyses
+            ])),
+            "timeline": sorted(set(
+                a['time_period'] for a in analyses if a['time_period']
+            ))
+        }
