@@ -30,7 +30,7 @@ AeroVision 是一個網頁應用程式，旨在簡化航班廢棄物數據收集
 [![Waste Data Analysis Flow](https://mermaid.ink/img/pako:eNp9kl9r01AYxr9KOFcTstLmb5uLQVlBe-GVgmDjxVly1hxMk5KcqLX0thYctOI2cCsbnWNKoaxOpnMFP405zb6FJ8napeA8V-fwPr_3fV7O0waGayKggW3bfW1Y0CPc04rucOz4wVbdg02Lq0ACN13bRgbBrsPV6N4V_XhAd3_cHHZfpNr4PMI-cT1sQDsGamt08jPsX6TiB_fquPX1De4Z9AlKqag3nvcn4eyE7n9aZZFj_sNYBftNG7YWrsJve_PT68y0Zetk0Ga84S3CHKZIr0uPBuFwPxp9vRmdMzz89T3sT7Oes1zS6GFswK-tZeH_AuVq2YF2y8cMmu8e096gXL0PvtMmaNXxcd0iy2nzywE9Gka9d9HZ--jL5yyZ2kqo5Za3OyVTGJTtkUUXU7LwXXVllSQHcMtGZfMVNhDz1T-PRjvh7DqaTDWOXh2G0w90OP7zu0svx9HFbOULAQ8ayGtAbLLYteOCDoiFGkgHGrua0HupA93pMB0MiPuk5RhAI16AeOC5Qd0C2ja0ffYKmiZkf4shS0NjIUEmZul6nIY6yTYPmtB57rpLCXsCrQ3eAE0s5XNySZBVRZRkuSCpPGgBTVFzoiIogiCWikJJUQsdHrxN-HxOUUVJkovFvFQQ87Isdf4CV2JKew?type=png)](https://mermaid.live/edit#pako:eNp9kl9r01AYxr9KOFcTstLmb5uLQVlBe-GVgmDjxVly1hxMk5KcqLX0thYctOI2cCsbnWNKoaxOpnMFP405zb6FJ8napeA8V-fwPr_3fV7O0waGayKggW3bfW1Y0CPc04rucOz4wVbdg02Lq0ACN13bRgbBrsPV6N4V_XhAd3_cHHZfpNr4PMI-cT1sQDsGamt08jPsX6TiB_fquPX1De4Z9AlKqag3nvcn4eyE7n9aZZFj_sNYBftNG7YWrsJve_PT68y0Zetk0Ga84S3CHKZIr0uPBuFwPxp9vRmdMzz89T3sT7Oes1zS6GFswK-tZeH_AuVq2YF2y8cMmu8e096gXL0PvtMmaNXxcd0iy2nzywE9Gka9d9HZ--jL5yyZ2kqo5Za3OyVTGJTtkUUXU7LwXXVllSQHcMtGZfMVNhDz1T-PRjvh7DqaTDWOXh2G0w90OP7zu0svx9HFbOULAQ8ayGtAbLLYteOCDoiFGkgHGrua0HupA93pMB0MiPuk5RhAI16AeOC5Qd0C2ja0ffYKmiZkf4shS0NjIUEmZul6nIY6yTYPmtB57rpLCXsCrQ3eAE0s5XNySZBVRZRkuSCpPGgBTVFzoiIogiCWikJJUQsdHrxN-HxOUUVJkovFvFQQ87Isdf4CV2JKew)
 
 - **數據收集模組**：
-  - 與共享資料庫整合，存儲來自各航班的歷史廢棄物數據，允許趨勢追蹤和回收率測量。
+  - 與廢棄物數據收集共享資料庫整合，存儲來自各航班的歷史廢棄物數據，允許趨勢追蹤和回收率測量。
 
 - **數據顯示和分析模組**：
   - 提供數據圖表洞察的視覺平台，幫助了解廢棄物分佈和回收表現。
@@ -42,7 +42,7 @@ AeroVision 是一個網頁應用程式，旨在簡化航班廢棄物數據收集
 
 - **後端**：使用 FastAPI 建立 API 端點，使用 SQLite 管理資料庫。
 - **前端**：使用 React 建立使用者介面，使用 Tailwind CSS 進行樣式設計。
-- **生成式人工智慧整合**：使用生成式人工智慧模型分析廢棄物數據並提供洞察。
+- **生成式人工智能整合**：使用大型語言模型 OpenAI GPT-4o 分析廢棄物數據並提供洞察。
 
 ## 入門指南
 
@@ -50,13 +50,14 @@ AeroVision 是一個網頁應用程式，旨在簡化航班廢棄物數據收集
 
 - 前端開發需要 Node.js 和 npm。
 - 後端開發需要 Python 和 pip。
+- 需要支援結構化輸出的 GPT-4o 模型版本 API (2024-08-06之後的版本)。
 
 ### 安裝
 
 1. **後端**：
    - 進入 `aerovision-backend` 目錄。
    - 安裝依賴項：`pip install -r requirements.txt`
-   - 啟動伺服器：`uvicorn analyze_main:app --reload`
+   - 啟動伺服器：`uvicorn collect_main:app --reload`
 
 2. **前端**：
    - 進入 `aerovision-frontend` 目錄。
